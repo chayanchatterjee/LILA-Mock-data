@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lila-mock-data"
+version = "0.1.0"
+description = "Generate mock time-domain datasets for LILA."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "LILA Mock Data contributors" }
+]
+dependencies = [
+  "astropy",
+  "h5py",
+  "lunarsky",
+  "numpy",
+  "pycbc",
+  "scipy",
+]
+
+[project.optional-dependencies]
+dev = [
+  "ruff>=0.5",
+]
+
+[project.scripts]
+lila-mock-data = "lila_mock_data:main"
+
+[tool.setuptools]
+py-modules = ["lila_mock_data"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
