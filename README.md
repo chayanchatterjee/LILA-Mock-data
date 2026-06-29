@@ -44,7 +44,7 @@ lila-mock-data --output lila_signal.hdf5
 You can also run the wrapper directly from the repository:
 
 ```bash
-python run_lila_mock_data.py --output lila_signal.hdf5
+python lila_mock_data.py --output lila_signal.hdf5
 ```
 
 Useful options:
