@@ -67,40 +67,6 @@ class SurfacePoint:
 
 
 # ------------------------------------------------------------
-# Lunar rotation angle
-# ------------------------------------------------------------
-
-def lunar_rotation_angle_since_start(obstime_gps, start_time):
-    """
-    Simple lunar sidereal phase since observation start.
-
-    This is not a full lunar orientation model.
-    It is the simple uniform rotation model used in the shared code.
-
-    Parameters
-    ----------
-    obstime_gps : float
-        GPS time in seconds.
-    start_time : astropy.time.Time
-        Observation start time.
-
-    Returns
-    -------
-    angle : astropy Quantity
-        Lunar rotation angle in radians.
-    """
-    lunar_sidereal_period = 27.321661 * 86400.0
-    time_utc = Time(obstime_gps, format="gps", scale="utc")
-    elapsed_time = (time_utc - start_time).to_value("s")
-
-    angle = 2.0 * np.pi * (
-        (elapsed_time % lunar_sidereal_period) / lunar_sidereal_period
-    )
-
-    return angle * u.rad
-
-
-# ------------------------------------------------------------
 # Barycentric lunar detector position
 # ------------------------------------------------------------
 
