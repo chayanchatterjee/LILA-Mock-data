@@ -473,10 +473,9 @@ def antenna_pattern_series(
     """
     Compute Fp(t), Fc(t) over all detector sample times.
 
-    Unlike the simplified hour-angle implementation, this function transforms
-    the ICRS source direction and polarization basis into the Moon-fixed MCMF
-    frame at each sample time. The time dependence comes from
-    MCMF(obstime=...), not from a manually constructed lunar sidereal angle.
+    This function transforms the ICRS source direction and polarization basis into the 
+    Moon-fixed MCMF frame at each sample time. The time dependence comes from
+    MCMF(obstime=...).
     """
     x_pol, y_pol = source_basis_icrs_to_mcmf(
         ra_rad=ra_rad,
