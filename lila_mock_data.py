@@ -336,9 +336,11 @@ def _icrs_cartesian_direction_to_mcmf(vec_icrs, obstimes):
     the longitude zero is the MCMF/selenographic prime meridian rather than a
     Moon-vernal-equinox direction.
 
-    This explicitly neglects translational parallax. Astropy frame transforms
-    are coordinate transforms between frames with different origins, so a
-    finite-distance source would include an origin-translation/parallax term.
+    This explicitly neglects translational parallax. When using Astropy frame transforms, 
+    if you transform a coordinate point directly into MCMF, Astropy may include the 
+    translation from the ICRS/SSB origin to the Moon-centered origin. That is a finite-distance 
+    parallax term. We do not want that for the antenna pattern.
+
     To get the pure direction rotation, we transform both the endpoint of a
     short vector and the ICRS origin to MCMF, subtract them, and normalize:
 
@@ -346,6 +348,15 @@ def _icrs_cartesian_direction_to_mcmf(vec_icrs, obstimes):
 
     The subtraction removes the frame-origin translation exactly, leaving only
     the orientation transformation into the Moon-fixed frame.
+
+
+    Conceptually:
+
+    x_{endpoint,MCMF} = R(t)[v−x_{Moon(t)}],
+    x_{origin,MCMF} = R(t)[−x_{Moon(t)}].
+
+  Subtracting gives:
+    x_{endpoint,MCMF} − x_{origin,MCMF} = R(t)v
 
     Parameters
     ----------
