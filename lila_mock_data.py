@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Generate mock time-domain LILA signals with PyCBC and lunarsky. Adapted from original luna_pus.py script.
+"""Generate mock time-domain LILA signals with PyCBC and lunarsky. Adapted from original luna_push.py script.
 
 This script:
   1. Generates barycentric hp/hc using pycbc.waveform.get_td_waveform.
