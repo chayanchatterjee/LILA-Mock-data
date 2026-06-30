@@ -409,8 +409,7 @@ def source_basis_icrs_to_mcmf(ra_rad, dec_rad, obstimes, psi_rad=0.0):
     The input RA/Dec are ICRS coordinates. This function constructs the usual
     ICRS sky basis vectors and transforms them into MCMF at each observation
     time. In other words, RA/Dec are inertial source labels, while MCMF is the
-    rotating Moon-fixed detector frame. No manual lunar sidereal time or
-    equinox-like zero point is used here.
+    rotating Moon-fixed detector frame.
 
     Parameters
     ----------
