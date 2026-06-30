@@ -349,7 +349,6 @@ def _icrs_cartesian_direction_to_mcmf(vec_icrs, obstimes):
     The subtraction removes the frame-origin translation exactly, leaving only
     the orientation transformation into the Moon-fixed frame.
 
-
     Conceptually:
 
     x_{endpoint,MCMF} = R(t)[v−x_{Moon(t)}],
