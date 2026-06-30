@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Generate mock time-domain LILA signals with PyCBC and lunarsky. Adapted from original luna_push.py script.
+"""Generate mock time-domain LILA signals with PyCBC and lunarsky. Adapted from original luna_pus.py script.
 
 This script:
   1. Generates barycentric hp/hc using pycbc.waveform.get_td_waveform.
@@ -404,7 +404,7 @@ def _icrs_cartesian_direction_to_mcmf(vec_icrs, obstimes):
 
 def source_basis_icrs_to_mcmf(ra_rad, dec_rad, obstimes, psi_rad=0.0):
     """
-    Build the source propagation and polarization basis in the Moon-fixed frame.
+    Build the source polarization basis in the Moon-fixed frame.
 
     The input RA/Dec are ICRS coordinates. This function constructs the usual
     ICRS sky basis vectors and transforms them into MCMF at each observation
@@ -423,8 +423,6 @@ def source_basis_icrs_to_mcmf(ra_rad, dec_rad, obstimes, psi_rad=0.0):
 
     Returns
     -------
-    n_mcmf : ndarray, shape (3, N)
-        Unit vector from detector/SSB toward the source, expressed in MCMF.
     x_pol : ndarray, shape (3, N)
         First polarization basis vector in MCMF.
     y_pol : ndarray, shape (3, N)
@@ -462,67 +460,7 @@ def source_basis_icrs_to_mcmf(ra_rad, dec_rad, obstimes, psi_rad=0.0):
     x_pol = cpsi * e_ra_mcmf + spsi * e_dec_mcmf
     y_pol = -spsi * e_ra_mcmf + cpsi * e_dec_mcmf
 
-    return n_mcmf, x_pol, y_pol
-
-
-def antenna_pattern_lunar(
-    det,
-    ra_rad,
-    dec_rad,
-    psi_rad,
-    obstime,
-    start_time=None,
-):
-    """
-    Lunar antenna pattern using a source-vector transformation into MCMF.
-
-    This replaces the simplified approximation
-
-        gha = lunar_phase - ra
-
-    with the more geometrical operation
-
-        ICRS source direction and polarization basis
-            -> MCMF(obstime)
-            -> contract with Moon-fixed detector tensor.
-
-    Parameters
-    ----------
-    det : dict
-        Detector response dictionary from detector_tensor_moon_fixed().
-    ra_rad, dec_rad, psi_rad : float
-        Source RA, Dec, and polarization in radians. RA/Dec are ICRS.
-    obstime : astropy.time.Time
-        Current detector sample time.
-    start_time : astropy.time.Time or None
-        Kept only for backward compatibility with the old function signature.
-        It is not used by this MCMF implementation.
-
-    Returns
-    -------
-    fplus, fcross : float
-        Long-wavelength antenna factors.
-    """
-    _, x_pol, y_pol = source_basis_icrs_to_mcmf(
-        ra_rad=ra_rad,
-        dec_rad=dec_rad,
-        obstimes=obstime,
-        psi_rad=psi_rad,
-    )
-
-    resp = det["response"]
-
-    # x_pol and y_pol have shape (3, 1) for scalar obstime.
-    x = x_pol[:, 0]
-    y = y_pol[:, 0]
-
-    dx = resp.dot(x)
-    dy = resp.dot(y)
-
-    fplus = np.sum(x * dx - y * dy)
-    fcross = np.sum(x * dy + y * dx)
-
-    return float(fplus), float(fcross)
+    return x_pol, y_pol
 
 
 def antenna_pattern_series(
@@ -531,7 +469,6 @@ def antenna_pattern_series(
     ra_rad,
     dec_rad,
     psi_rad,
-    start_time=None,
 ):
     """
     Compute Fp(t), Fc(t) over all detector sample times.
@@ -541,7 +478,7 @@ def antenna_pattern_series(
     frame at each sample time. The time dependence comes from
     MCMF(obstime=...), not from a manually constructed lunar sidereal angle.
     """
-    _, x_pol, y_pol = source_basis_icrs_to_mcmf(
+    x_pol, y_pol = source_basis_icrs_to_mcmf(
         ra_rad=ra_rad,
         dec_rad=dec_rad,
         obstimes=obstimes,
@@ -557,7 +494,6 @@ def antenna_pattern_series(
     fc = np.sum(x_pol * dy + y_pol * dx, axis=0)
 
     return fp.astype(np.float64), fc.astype(np.float64)
-
 
 
 # ------------------------------------------------------------
@@ -577,7 +513,8 @@ def generate_barycentric_waveform(
     """
     Generate barycentric-frame hp/hc using PyCBC.
 
-    Returns arrays and the original PyCBC TimeSeries objects.
+    Returns arrays and the original PyCBC h_plus TimeSeries object.
+    The h_plus object is used only to report the PyCBC start time.
     """
     from pycbc.waveform import get_td_waveform
 
@@ -596,14 +533,13 @@ def generate_barycentric_waveform(
 
     hp, hc = get_td_waveform(**kwargs)
 
-    t = np.asarray(hp.sample_times, dtype=np.float64)
     hp_arr = np.asarray(hp, dtype=np.float64)
     hc_arr = np.asarray(hc, dtype=np.float64)
 
-    return t, hp_arr, hc_arr, hp, hc
+    return hp_arr, hc_arr, hp
 
 
-def pad_to_duration_keep_merger_near_end(t, hp, hc, duration, delta_t):
+def pad_to_duration_keep_merger_near_end(hp, hc, duration, delta_t):
     """
     Pad or crop waveform to a requested duration.
     
@@ -664,7 +600,6 @@ def project_to_lila(
         Contains detector time, shifted polarizations, delay, antenna
         patterns, and final strain.
     """
-    delta_t = t_bary[1] - t_bary[0]
     n = len(t_bary)
 
     surface_point = SurfacePoint(det_lat_rad, det_lon_rad, det_h_m)
@@ -725,7 +660,6 @@ def project_to_lila(
             ra_rad=ra_rad,
             dec_rad=dec_rad,
             psi_rad=psi_rad,
-            start_time=start_time,
         )
 
         hp_shifted[start:stop] = hp_tmp
@@ -915,7 +849,7 @@ def main(argv=None):
         args.xangle = args.yangle + np.pi / 2.0
 
     LOGGER.info("Generating barycentric hp/hc with PyCBC")
-    t_raw, hp_raw, hc_raw, hp_ts, hc_ts = generate_barycentric_waveform(
+    hp_raw, hc_raw, hp_ts = generate_barycentric_waveform(
         mass1=args.mass1,
         mass2=args.mass2,
         distance=args.distance,
@@ -932,7 +866,6 @@ def main(argv=None):
 
     LOGGER.info("Padding/cropping to requested duration")
     t_bary, hp_bary, hc_bary = pad_to_duration_keep_merger_near_end(
-        t=t_raw,
         hp=hp_raw,
         hc=hc_raw,
         duration=args.duration,
@@ -981,6 +914,19 @@ def main(argv=None):
         "yangle_rad": args.yangle,
         "xangle_rad": args.xangle,
         "start_time_utc": args.start_time,
+        "sky_frame": "ICRS RA/Dec for source direction",
+        "detector_frame": (
+            "MCMF / Moon-Centered Moon-Fixed; body-fixed selenographic "
+            "longitude measured from the lunar prime meridian, not an equinox"
+        ),
+        "antenna_pattern_method": (
+            "ICRS source and polarization basis transformed to MCMF(obstime); "
+            "no toy lunar sidereal-time phase used"
+        ),
+        "parallax_in_antenna_pattern": (
+            "Neglected by transforming endpoint and origin to MCMF and subtracting; "
+            "time delay still uses barycentric detector position"
+        ),
     }
 
     LOGGER.info("Writing %s", args.output)
