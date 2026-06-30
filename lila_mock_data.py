@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Generate mock time-domain LILA signals with PyCBC and lunarsky.
+"""Generate mock time-domain LILA signals with PyCBC and lunarsky. Adapted from original luna_push.py script.
 
 This script:
   1. Generates barycentric hp/hc using pycbc.waveform.get_td_waveform.
@@ -42,6 +42,18 @@ from scipy.interpolate import CubicSpline
 LOGGER = logging.getLogger(__name__)
 
 
+def _time_length(obstimes):
+    """Return 1 for scalar astropy Time objects, otherwise len(obstimes)."""
+    return 1 if getattr(obstimes, "isscalar", False) else len(obstimes)
+
+
+def _time_as_array(obstimes):
+    """Return obstimes as a length-1 Time array when a scalar Time is supplied."""
+    if getattr(obstimes, "isscalar", False):
+        return Time([obstimes])
+    return obstimes
+
+
 # ------------------------------------------------------------
 # Basic lunar surface point
 # ------------------------------------------------------------
@@ -74,10 +86,16 @@ def lunar_surface_position_barycentric(surface_point, obstimes):
     """
     Return barycentric coordinates of a lunar surface point.
 
-    The detector is fixed in the Moon-fixed MCMF frame, but the transform
-    to barycentric/ecliptic coordinates is time-dependent. Therefore, when
-    obstimes is an array, the same fixed MCMF coordinate must be broadcast
-    to every time sample.
+    MCMF is the Moon-Centered Moon-Fixed frame: a rotating, body-fixed
+    lunar frame analogous to an Earth-fixed frame, not an inertial
+    RA/Dec-like frame. Its longitude zero is the lunar/MCMF prime meridian
+    used by the selenographic coordinate system, not a Moon analogue of the
+    vernal equinox.
+
+    The detector is fixed in that Moon-body frame, but the transform from
+    MCMF to a barycentric frame is time-dependent. Therefore, when obstimes
+    is an array, the same fixed MCMF coordinate must be broadcast to every
+    time sample before transformation.
     """
     from lunarsky import MCMF, MoonLocation
 
@@ -90,7 +108,8 @@ def lunar_surface_position_barycentric(surface_point, obstimes):
     # Fixed Moon-body coordinate of the detector site.
     mcmf_xyz = location.mcmf.cartesian.xyz.to(u.m)
 
-    n_time = 1 if obstimes.isscalar else len(obstimes)
+    obstimes = _time_as_array(obstimes)
+    n_time = _time_length(obstimes)
 
     # Ensure shape is (3, N).
     if mcmf_xyz.ndim == 1:
@@ -211,7 +230,9 @@ def detector_tensor_moon_fixed(
     Construct a Moon-fixed detector tensor and arm vectors.
 
     The detector is modeled as a long-wavelength Michelson interferometer with
-    two arms fixed in the lunar surface frame.
+    two arms fixed in the lunar surface/MCMF frame. MCMF longitudes are
+    body-fixed selenographic longitudes measured from the lunar prime
+    meridian, not from an equinox.
 
     Parameters
     ----------
@@ -245,6 +266,10 @@ def detector_tensor_moon_fixed(
         ]
     )
 
+    # These rotations place the local arm frame at the requested
+    # selenographic longitude/latitude in the Moon-fixed frame. The longitude
+    # origin is the MCMF/selenographic prime meridian, not a sidereal/equinox
+    # reference.
     rm2 = rotation_matrix(-longitude.radian, "z")
     rm1 = rotation_matrix(-1.0 * (np.pi / 2.0 - latitude.radian), "y")
 
@@ -279,13 +304,17 @@ def detector_tensor_moon_fixed(
     }
 
 
-def _normalize_columns(arr):
-    """
-    Normalize a 3 x N array column-by-column.
+def _normalize_columns(arr, *, name="array"):
+    """Normalize a 3 x N array column-by-column.
+
+    Raises an explicit error for zero-length vectors instead of silently
+    returning a zero column. A zero vector would make the antenna basis
+    ill-defined.
     """
     arr = np.asarray(arr, dtype=np.float64)
     norm = np.linalg.norm(arr, axis=0)
-    norm = np.where(norm == 0.0, 1.0, norm)
+    if np.any(norm == 0.0):
+        raise ValueError(f"Cannot normalize zero-length column in {name}.")
     return arr / norm
 
 
@@ -302,6 +331,10 @@ def _as_3_by_n_quantity(xyz_q):
 def _icrs_cartesian_direction_to_mcmf(vec_icrs, obstimes):
     """
     Transform a pure ICRS Cartesian direction vector into MCMF.
+
+    MCMF is Moon-centered and Moon-fixed. Its axes rotate with the lunar body;
+    the longitude zero is the MCMF/selenographic prime meridian rather than a
+    Moon-vernal-equinox direction.
 
     This explicitly neglects translational parallax. Astropy frame transforms
     are coordinate transforms between frames with different origins, so a
@@ -330,9 +363,13 @@ def _icrs_cartesian_direction_to_mcmf(vec_icrs, obstimes):
     from lunarsky import MCMF
 
     vec_icrs = np.asarray(vec_icrs, dtype=np.float64)
-    vec_icrs = vec_icrs / np.linalg.norm(vec_icrs)
+    vec_norm = np.linalg.norm(vec_icrs)
+    if vec_norm == 0.0:
+        raise ValueError("Cannot transform a zero-length ICRS direction vector.")
+    vec_icrs = vec_icrs / vec_norm
 
-    n_time = 1 if obstimes.isscalar else len(obstimes)
+    obstimes = _time_as_array(obstimes)
+    n_time = _time_length(obstimes)
 
     # Any nonzero length works because we subtract the transformed origin and
     # then normalize. Use meters only to give Astropy a concrete distance unit.
@@ -362,7 +399,7 @@ def _icrs_cartesian_direction_to_mcmf(vec_icrs, obstimes):
 
     xyz = (endpoint_xyz - origin_xyz).to_value(u.m)
 
-    return _normalize_columns(xyz)
+    return _normalize_columns(xyz, name="ICRS-to-MCMF direction")
 
 
 def source_basis_icrs_to_mcmf(ra_rad, dec_rad, obstimes, psi_rad=0.0):
@@ -371,7 +408,9 @@ def source_basis_icrs_to_mcmf(ra_rad, dec_rad, obstimes, psi_rad=0.0):
 
     The input RA/Dec are ICRS coordinates. This function constructs the usual
     ICRS sky basis vectors and transforms them into MCMF at each observation
-    time.
+    time. In other words, RA/Dec are inertial source labels, while MCMF is the
+    rotating Moon-fixed detector frame. No manual lunar sidereal time or
+    equinox-like zero point is used here.
 
     Parameters
     ----------
@@ -410,11 +449,11 @@ def source_basis_icrs_to_mcmf(ra_rad, dec_rad, obstimes, psi_rad=0.0):
 
     # Numerical cleanup: enforce an orthonormal triad in MCMF.
     e_ra_mcmf = e_ra_mcmf - n_mcmf * np.sum(n_mcmf * e_ra_mcmf, axis=0)
-    e_ra_mcmf = _normalize_columns(e_ra_mcmf)
+    e_ra_mcmf = _normalize_columns(e_ra_mcmf, name="e_ra_mcmf")
 
     e_dec_mcmf = e_dec_mcmf - n_mcmf * np.sum(n_mcmf * e_dec_mcmf, axis=0)
     e_dec_mcmf = e_dec_mcmf - e_ra_mcmf * np.sum(e_ra_mcmf * e_dec_mcmf, axis=0)
-    e_dec_mcmf = _normalize_columns(e_dec_mcmf)
+    e_dec_mcmf = _normalize_columns(e_dec_mcmf, name="e_dec_mcmf")
 
     # Apply GW polarization rotation in the tangent plane.
     cpsi = np.cos(psi_rad)
@@ -497,9 +536,10 @@ def antenna_pattern_series(
     """
     Compute Fp(t), Fc(t) over all detector sample times.
 
-    Unlike the simplified hour-angle implementation, this function transforms the ICRS
-    source direction and polarization basis into the Moon-fixed MCMF frame
-    at each sample time.
+    Unlike the simplified hour-angle implementation, this function transforms
+    the ICRS source direction and polarization basis into the Moon-fixed MCMF
+    frame at each sample time. The time dependence comes from
+    MCMF(obstime=...), not from a manually constructed lunar sidereal angle.
     """
     _, x_pol, y_pol = source_basis_icrs_to_mcmf(
         ra_rad=ra_rad,
@@ -517,56 +557,6 @@ def antenna_pattern_series(
     fc = np.sum(x_pol * dy + y_pol * dx, axis=0)
 
     return fp.astype(np.float64), fc.astype(np.float64)
-
-
-# Optional diagnostic: compare the simplified hour-angle formula against the
-# new MCMF transformation for short tests.
-def antenna_pattern_lunar_hour_angle(
-    det,
-    ra_rad,
-    dec_rad,
-    psi_rad,
-    obstime,
-    start_time,
-):
-    """
-    Simplified hour-angle antenna pattern retained for validation studies.
-
-    The production path uses antenna_pattern_lunar(), which transforms the
-    ICRS source basis into MCMF before contracting with the detector tensor.
-    """
-    t_gps = float(obstime.gps)
-    lunar_phase = lunar_rotation_angle_since_start(t_gps, start_time).to_value(u.rad)
-    gha = lunar_phase - ra_rad
-
-    cosgha = np.cos(gha)
-    singha = np.sin(gha)
-    cosdec = np.cos(dec_rad)
-    sindec = np.sin(dec_rad)
-    cospsi = np.cos(psi_rad)
-    sinpsi = np.sin(psi_rad)
-
-    resp = det["response"]
-
-    x = np.array([
-        -cospsi * singha - sinpsi * cosgha * sindec,
-        -cospsi * cosgha + sinpsi * singha * sindec,
-        sinpsi * cosdec,
-    ])
-
-    y = np.array([
-        sinpsi * singha - cospsi * cosgha * sindec,
-        sinpsi * cosgha + cospsi * singha * sindec,
-        cospsi * cosdec,
-    ])
-
-    dx = resp.dot(x)
-    dy = resp.dot(y)
-
-    fplus = np.sum(x * dx - y * dy)
-    fcross = np.sum(x * dy + y * dx)
-
-    return float(fplus), float(fcross)
 
 
 
@@ -616,8 +606,7 @@ def generate_barycentric_waveform(
 def pad_to_duration_keep_merger_near_end(t, hp, hc, duration, delta_t):
     """
     Pad or crop waveform to a requested duration.
-
-    PyCBC TD waveforms often have merger near t=0 and start_time < 0.
+    
     This function returns a time grid from 0 to duration and places
     the generated waveform at the end of that grid.
 
@@ -992,13 +981,6 @@ def main(argv=None):
         "yangle_rad": args.yangle,
         "xangle_rad": args.xangle,
         "start_time_utc": args.start_time,
-        "delay_convention": "t_bary_query = t_det + k dot r_det(t_det) / c, with k=-n",
-        "response_model": "long-wavelength Michelson geometric response",
-        "limitations": (
-            "No LILA noise PSD, no lunar elastic transfer function, "
-            "no relativistic clock corrections; antenna pattern transforms "
-            "ICRS source basis to MCMF."
-        ),
     }
 
     LOGGER.info("Writing %s", args.output)
